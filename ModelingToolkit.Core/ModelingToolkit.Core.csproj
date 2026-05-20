@@ -1,6 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <PackageReference Include="System.Drawing.Common" />
+    <PackageReference Include="SkiaSharp" />
   </ItemGroup>
 </Project>

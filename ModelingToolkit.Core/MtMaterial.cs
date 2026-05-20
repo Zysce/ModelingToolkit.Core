@@ -1,4 +1,5 @@
-﻿using System.Drawing;
+﻿using System.IO;
+using SkiaSharp;
 
 namespace ModelingToolkit.Core
 {
@@ -21,7 +22,7 @@ namespace ModelingToolkit.Core
 
         // As Texture
         public string? DiffuseTextureFileName;
-        public Bitmap? DiffuseTextureBitmap;
+        public SKBitmap? DiffuseTextureBitmap;
 
         public MtMaterial()
         {
@@ -33,6 +34,7 @@ namespace ModelingToolkit.Core
         {
             return Name + " [" + DiffuseTextureFileName + "]";
         }
+
         public void GenerateBitmap()
         {
             if (Data == null || Clut == null || Width <= 0 || Height <= 0)
@@ -45,65 +47,71 @@ namespace ModelingToolkit.Core
                 throw new ArgumentException("Image data length or CLUT length is invalid");
             }
 
-            DiffuseTextureBitmap = new Bitmap(Width, Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            DiffuseTextureBitmap = new SKBitmap(Width, Height, SKColorType.Bgra8888, SKAlphaType.Premul);
 
-            using (MemoryStream stream = new MemoryStream(Data))
+            using var stream = new MemoryStream(Data);
+            for (int y = 0; y < Height; y++)
             {
-                for (int y = 0; y < Height; y++)
+                for (int x = 0; x < Width; x++)
                 {
-                    for (int x = 0; x < Width; x++)
+                    int pixelValue = stream.ReadByte();
+                    if (pixelValue < 0)
                     {
-                        byte pixelIndex = (byte)stream.ReadByte();
-                        Color pixelColor = GetColorFromClutRgba(pixelIndex);
-                        DiffuseTextureBitmap.SetPixel(x, y, pixelColor);
+                        throw new EndOfStreamException();
                     }
+
+                    SKColor pixelColor = GetColorFromClutRgba((byte)pixelValue);
+                    DiffuseTextureBitmap.SetPixel(x, y, pixelColor);
                 }
             }
         }
 
-        private Color GetColorFromClutRgba(int index)
+        private SKColor GetColorFromClutRgba(int index)
         {
             int start = index * 4 * ColorSize;
             int red = 0;
             int green = 0;
             int blue = 0;
             int alpha = 0;
-            using (Stream clutStream = new MemoryStream(Clut))
+            using var clutStream = new MemoryStream(Clut);
+            clutStream.Position = start;
+            using var reader = new BinaryReader(clutStream);
+            if (ColorSize == 1)
             {
-                clutStream.Position = start;
-                BinaryReader reader = new BinaryReader(clutStream);
-                if (ColorSize == 1)
-                {
-                    red = reader.ReadByte();
-                    green = reader.ReadByte();
-                    blue = reader.ReadByte();
-                    if (PixelHasAlpha) alpha = reader.ReadByte();
-                }
-                else if (ColorSize == 2)
-                {
-                    red = reader.ReadInt16();
-                    green = reader.ReadInt16();
-                    blue = reader.ReadInt16();
-                    if (PixelHasAlpha) alpha = reader.ReadInt16();
-                }
-                else if (ColorSize == 4)
-                {
-                    red = reader.ReadInt32();
-                    green = reader.ReadInt32();
-                    blue = reader.ReadInt32();
-                    if (PixelHasAlpha) alpha = reader.ReadInt32();
-                }
-                else
-                {
-                    throw new Exception("Color size not set or invalid");
-                }
+                red = reader.ReadByte();
+                green = reader.ReadByte();
+                blue = reader.ReadByte();
+                if (PixelHasAlpha) alpha = reader.ReadByte();
+            }
+            else if (ColorSize == 2)
+            {
+                red = reader.ReadInt16();
+                green = reader.ReadInt16();
+                blue = reader.ReadInt16();
+                if (PixelHasAlpha) alpha = reader.ReadInt16();
+            }
+            else if (ColorSize == 4)
+            {
+                red = reader.ReadInt32();
+                green = reader.ReadInt32();
+                blue = reader.ReadInt32();
+                if (PixelHasAlpha) alpha = reader.ReadInt32();
+            }
+            else
+            {
+                throw new Exception("Color size not set or invalid");
             }
 
-            return Color.FromArgb(alpha, red, green, blue);
+            return new SKColor((byte)red, (byte)green, (byte)blue, (byte)alpha);
         }
 
         public void BitmapToDataClut(int clutSize = 256)
         {
+            if (DiffuseTextureBitmap == null)
+            {
+                throw new ArgumentException("Can't convert bitmap");
+            }
+
             Data = new byte[Width * Height];
             List<int> clutList = new List<int>();
             clutList.Add(0); // No color
@@ -112,8 +120,8 @@ namespace ModelingToolkit.Core
             {
                 for (int x = 0; x < Width; x++)
                 {
-                    Color pixelColor = DiffuseTextureBitmap.GetPixel(x, y);
-                    int intColor = pixelColor.ToArgb();
+                    SKColor pixelColor = DiffuseTextureBitmap.GetPixel(x, y);
+                    int intColor = (pixelColor.Alpha << 24) | (pixelColor.Red << 16) | (pixelColor.Green << 8) | pixelColor.Blue;
                     int colorIndexInt = clutList.IndexOf(intColor);
                     if (colorIndexInt == -1)
                     {
@@ -122,7 +130,7 @@ namespace ModelingToolkit.Core
                             throw new Exception("The image has more than " + clutSize + " colors");
                         }
 
-                        colorIndexInt = (byte)clutList.Count;
+                        colorIndexInt = clutList.Count;
                         clutList.Add(intColor);
                     }
                     Data[Width * y + x] = (byte)colorIndexInt;
