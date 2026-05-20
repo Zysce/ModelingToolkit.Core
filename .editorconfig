@@ -1,0 +1,9 @@
+root = true
+
+[*.{cs,vb}]
+indent_style = tab
+tab_width = 4
+
+[*.cs]
+# Prefer file-scoped namespaces
+csharp_style_namespace_declarations = file_scoped:suggestion
